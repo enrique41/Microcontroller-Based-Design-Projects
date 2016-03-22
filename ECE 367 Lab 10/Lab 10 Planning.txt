@@ -1,0 +1,50 @@
+To Do
+1. Shorten directions
+
+
+
+
+; ***BEGIN PSEUDOCODE PRELIM***
+               ; INITIALIZE SYSTEM (DONE)
+               ; INITIALIZE LCD (IN INIT SYSTEM?) (DONE)
+               ; IDENTIFY DEVICE BY PRODUCT NAME (TEVOLI 13 METER BY CUI) (DONE)
+               ; DISPLAY INSTRUCTIONS (DONE)
+               ; DISPLAY USER CHOICES (DONE)
+               ; WAIT FOR KEYPRESS  (DONE)
+               ; GET KEY (DONE)
+               ; CHANGE MODE (DONE)
+               ; CHANGE BASE_MODE (DONE)
+               ; GET A/D VALUE
+               ; CALCULATE MEASUREMENT
+               ; DISPLAY MEASUREMENT IN CORRECT UNIT
+               ; SAMPLE NEW VALUE EVERY 1 SECONDS (DONE)
+               ; LOOP TO BEGINNING (DONE)
+               
+               ; ***FUNCTIONS TO BE BUILT***
+               ;    1. CHANGE_MODE (VAR)
+               ;    2. CHANGE BASE OUTPUT
+               ;    9. GET VOLTAGE A/D DATA (VAR)
+               ;    10. GET TEMP A/D DATA (VAR)
+               ;    11. GET LIGHT A/D DATA (VAR) 
+               ;    12. CALCULATE TEMPERATURE
+               ;    13. CALCULATE BRIGHTNESS
+               ;    14. CALCULATE VOLTAGE
+               ; ***FUNCTIONS AVAILABLE***
+               ;    1. INIT - INITIALIZE SYSTEM
+               ;    2. InitLCD - INITIALIZE THE LCD
+               ;    3. GET_KEY RETREIVES THE KEY PRESSED
+               ;    4. KEY_RELEASE - WAITS FOR THE USER TO RELEASE THE KEY TO PREVENT BOUNCE
+               ;    5. IS_NUMBER_KEY - CHECKS TO SEE IF KEY IS A NUMBER KEY, SETS FLAG IF TRUE
+               ;    6. DRAW_SCREEN - DRAWS SCREEN ON LCD
+               ;    7. DIRECTIONS - DISPLAY SYSTEM DIRECTIONS ON SCREEN
+               ;    8. KEY_TO_ASCII - CONVERTS A 2 BYTE VALUE TO ASCII
+               ;    9  INTRODUCTION - DISPLAYS THE DEVICE INTRODUCTION
+               ;   10. DISPLAY_MODE
+               ;   11. DISPLAY_BASE_MODE
+               ;   12. DISPLAY_BIN
+               ;   13. DISPLAY_HEX
+               ;   14. DISPLAY_DEC
+
+
+
+               

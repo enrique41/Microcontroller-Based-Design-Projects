@@ -1,0 +1,1114 @@
+*** EVALUATION ***
+ANSI-C/cC++ Compiler for HC12 V-5.0.41 Build 10203, Jul 23 2010
+
+    1:  //*********************************************************************************************************
+    2:  // University of Illinois at Chicago, Dept. of Electrical and Computer Engineering
+    3:  // ECE 367 -Microprocessor-Based Design
+    4:  // Semester: Spring 2013
+    5:  
+    6:  // Experiment Title: Count Up/Down Timer Using The SPI Subsystem and LCD Display
+    7:  // Experiment Description: This system is a timer that is capable of starting and 
+    8:  //                         pausing operation, as well as reversing the count direction.
+    9:  //                         It will count from 00 to 99 or 99 to 00 and when it reaches 00
+   10:  //                         again, it will blink 3 times and then reset the system.  You 
+   11:  //                         can enter number values on the keypad at any time to change the
+   12:  //                         timing values.  All data displayed on LCD.                      
+   13:  // Date: 4/13/2013
+   14:  // Updated: 4/13/2013
+   15:  // Version: 1
+   16:  // Programmer: Mitchell Hedditch
+   17:  // Lab Session: Tuesday 8AM-10:50AM 
+   18:  //*********************************************************************************************************
+   19:  /* Some include (header) files needed by Codewarrior with machine info for the NanoCore12                */
+   20:  
+   21:  #include <hidef.h>                                          /* common defines and macros                 */
+   22:  #include "derivative.h"                                     /* derivative-specific definitions           */
+   23:  
+   24:  
+   25:  /* We need to define some constants. Similar to EQU's in assembly                                        */
+   26:  #define     IOREGS_BASE  0x0000
+   27:  
+   28:  #define     _IO8(off)    *(unsigned char  volatile *)(IOREGS_BASE + off) //define form prototype 8-bit
+   29:  #define     _IO16(off)   *(unsigned short volatile *)(IOREGS_BASE + off) //define form prototype 16-bit
+   30:  
+   31:  
+   32:  //#define   PORTT     _IO8(0x240)     
+   33:  /* portT data register is unsigned 8-bit at address $0240                                                */
+   34:  /* because of the form prototype defines above this is the same as                                       */                                                                 
+   35:  /* #define PORTT *(unsigned char  volatile *) (0x240);    Means PORTT points to address $0240            */
+   36:  /* the statement PORTT = 0x34; means to store $34 at location $0240                                      */
+   37:  /* if the contents of PORTT is 0xd3 then the assignment x = PORTT; means x is now equal to 0xd3          */
+   38:  /*********************************************************************************************************/
+   39:  /* The commented out defines already exist in one of the above header files. The compiler                */
+   40:  /* does not like the redundancy. So, they are commented out with the // symbols                          */
+   41:  //#define     TSCR1   _IO8(0x46)             //timer system control register
+   42:  //#define     PTT     _IO8(0x240)            //portt data register
+   43:  //#define     DDRT    _IO8(0x242)            //portt direction register
+   44:  //#define     CRGFLG  _IO8(0x37)             //pll flags register
+   45:  //#define     SYNR    _IO8(0x34)             //synthesizer / multiplier register
+   46:  //#define     REFDV   _IO8(0x35)             //reference divider register
+   47:  //#define     CLKSEL  _IO8(0x39)             //clock select register
+   48:  //#define     PLLCTL  _IO8(0x3a)             //pll control register
+   49:  #define   PORTT    _IO8(0x240)               // PortT data register     
+   50:  #define   PORTTi   _IO8(0x241)               // portT data register
+   51:  #define   PORTM    _IO8(0x250)               // portM data register
+   52:  #define   MCCTL    _IO8(0x66)                //modulus down conunter control
+   53:  #define   MCFLG    _IO8(0x67)                //down counter flags
+   54:  #define   SPCR1    _IO8(0xD8)                //SPI SPCR1 REGISTER LOCATION
+   55:  #define   SPCR2    _IO8(0xD9)                //SPI SPCR2 REGISTER LOCATION
+   56:  #define   SPIB     _IO8(0xDA)                //SPI SPIB REGISTER LOCATION
+   57:  #define   SPSR     _IO8(0xDB)                //SPI SPSR REGISTER LOCATION
+   58:  #define   SPDR     _IO8(0xDD)                //SPI SPDR REGISTER LOCATION
+   59:  #define   MCCNT    _IO16(0x76)               //modulus down counter register
+   60:  #define   keypad   PORTT
+   61:  
+   62:  
+   63:  // Let's define some bit locations for some flags and config bits
+   64:  #define   PLLSEL  0x80
+   65:  #define   LOCK    0x08
+   66:  #define   TFFCA   0x10
+   67:  #define   MCZF    0x80
+   68:  #define   BIT0    0x01
+   69:  #define   BIT1    0x02
+   70:  #define   BIT2    0x04
+   71:  #define   BIT3    0x08
+   72:  #define   BIT4    0x10
+   73:  #define   BIT5    0x20
+   74:  #define   BIT6    0x40
+   75:  #define   BIT7    0x80
+   76:  #define   ENABLE  0x02                       // LCD ENABLE AT PM1
+   77:  #define   RCK     0x08                       // RCK CONNECTED TO PM3
+   78:  #define   RS      0x01                       // REGISTER SELECT (RS) AT PM0 (0=COMMAND,1=DATA)
+   79:  
+   80:  
+   81:  // Let's define our general variables
+   82:  unsigned char DIRECTION;
+   83:  unsigned char PAUSE;
+   84:  unsigned int TIMER_COUNT;
+   85:  unsigned char COUNT_VALUE;
+   86:  
+   87:  
+   88:  /* Here we give function prototypes before we start on the main code */
+   89:  char getkey(void);
+   90:  void SetClk8(void); 
+   91:  void delayby1ms(int k);
+   92:  void keyrelease(void);
+   93:  void Command(char a);
+   94:  void Print(char a);
+   95:  void Clear(void); 
+   96:  void delay(void);
+   97:  void delay3(void);
+   98:  void systemInitialize(void);
+   99:  void SPIInitialize(void);
+  100:  void InitLCD(void);
+  101:  void updateDisplay(void);
+  102:  void insertNumber(char Number);
+  103:  void displayNumber(void);
+  104:  void blink(void);
+  105:  
+  106:  /******************************************************************
+  107:  *  This is the main code where everything should go,
+  108:  *  All program function is directed by this code
+  109:  *****************************************************************/
+  110:  void main(void) 
+  111:  {
+*** EVALUATION ***
+
+Function: main
+Source  : C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\Sources\main.c
+Options : -CPUHCS12 -D_HCS12_SERIALMON -D__NO_FLOAT__ -Env"GENPATH=C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11;C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\bin;C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\prm;C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\cmd;C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\Sources;C:\Program Files (x86)\Freescale\CWS12v5.1\lib\HC12c\lib;C:\Program Files (x86)\Freescale\CWS12v5.1\lib\HC12c\src;C:\Program Files (x86)\Freescale\CWS12v5.1\lib\HC12c\include" -Env"LIBPATH=C:\Program Files (x86)\Freescale\CWS12v5.1\lib\HC12c\include" -Env"OBJPATH=C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\bin" -Env"TEXTPATH=C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\bin" -Lasm=%n.lst -Ms -ObjN="C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\ECE_367_Lab_11_Data\Standard\ObjectCode\main.c.o" -WmsgSd1106
+
+  0000 36           [2]     PSHA  
+  112:       char key1;
+  113:  	
+  114:  	systemInitialize();                                              //Run system initialization
+  0001 160000       [4]     JSR   systemInitialize
+  115:       
+  116:       updateDisplay();                                                 //Print out the display
+  0004 160000       [4]     JSR   main:0x009e
+  117:       
+  118:       TIMER_COUNT = 0;                                                 // INITIALIZE TIMER_COUNT TO 0
+  119:            
+  120:  	while(1)                                                         // this is and infinite while loop
+  121:       {   
+  122:            /* OK. 1ms gone by. Let's see if user pressed the A key or the B key. */
+  123:  		key1  = getkey();                                           // go check for keypress
+  0007 160000       [4]     JSR   getkey
+  000a 6b80         [2]     STAB  0,SP
+  124:  		if(key1 < 0x1f)                                             // did we get a key? If so, do the next three statements
+  000c c11f         [1]     CMPB  #31
+  000e 2c41         [3/1]   BGE   *+67 ;abs = 0051
+  125:  		{
+  126:  		     keyrelease();                                          //check for keyrelease
+  0010 160000       [4]     JSR   keyrelease
+  127:  		     delay();                                               //short delay
+  0013 160000       [4]     JSR   delay
+  128:  			while((PORTTi & 0x08));                                // if column 3 is HIGH wait here until LOW  
+  0016 1e024108fb   [5]     BRSET 577,#8,*+0 ;abs = 0016
+  129:  			if(key1 >= 10)                                         //Did user press anything above 9?
+  001b e680         [3]     LDAB  0,SP
+  001d c10a         [1]     CMPB  #10
+  001f 2d2a         [3/1]   BLT   *+44 ;abs = 004b
+  130:  			{
+  131:  				if(key1==10)                                      // If user pressed A do the following
+  0021 2610         [3/1]   BNE   *+18 ;abs = 0033
+  132:  				{
+  133:  				     PAUSE=~PAUSE;                                // Compliment the Start/Stop flag.
+  0023 710000       [4]     COM   PAUSE
+  134:  				     
+  135:  				     if (COUNT_VALUE==99) COUNT_VALUE = 0;        //IF COUNT VALUE IS 0, AND WE'RE STARTING TO COUNT DOWN, SET IT TO 99
+  0026 f60000       [3]     LDAB  COUNT_VALUE
+  0029 c163         [1]     CMPB  #99
+  002b 2603         [3/1]   BNE   *+5 ;abs = 0030
+  002d 790000       [3]     CLR   COUNT_VALUE
+  136:  				
+  137:                           updateDisplay();                             //Print out the display
+  0030 160000       [4]     JSR   updateDisplay
+  138:                      }
+  139:  				if(key1==11)                                      // If user pressed B do the following
+  0033 e680         [3]     LDAB  0,SP
+  0035 c10b         [1]     CMPB  #11
+  0037 2618         [3/1]   BNE   *+26 ;abs = 0051
+  140:  				{
+  141:  				     DIRECTION=~DIRECTION;                        // Compliment the Up/Down flag.
+  0039 710000       [4]     COM   DIRECTION
+  142:  				     
+  143:  				     if (COUNT_VALUE==0) COUNT_VALUE = 99;        //IF COUNT VALUE IS 0, AND WE'RE STARTING TO COUNT DOWN, SET IT TO 99
+  003c f60000       [3]     LDAB  COUNT_VALUE
+  003f 2605         [3/1]   BNE   *+7 ;abs = 0046
+  0041 c663         [1]     LDAB  #99
+  0043 7b0000       [3]     STAB  COUNT_VALUE
+  144:  				
+  145:  				     updateDisplay();                             //Print out the display
+  0046 160000       [4]     JSR   updateDisplay
+  146:                      } 
+  147:  		     } 
+  0049 2006         [3]     BRA   *+8 ;abs = 0051
+  148:  		     else 
+  149:  		     {
+  150:  		          insertNumber(key1);                               // if we're here then insert a new number for the user.        
+  004b 160000       [4]     JSR   insertNumber
+  151:  		          updateDisplay();                                  //Print out the display
+  004e 160000       [4]     JSR   updateDisplay
+  152:                 }
+  153:  	     }
+  154:            
+  155:            if (PAUSE != 0x01)                                          // IF WE'RE NOT IN PAUSE MODE
+  0051 f60000       [3]     LDAB  PAUSE
+  0054 0411b0       [3]     DBEQ  B,*-77 ;abs = 0007
+  156:            {
+  157:                 delayby1ms(1);                                         // DELAY BY 1 MSEC
+  0057 c601         [1]     LDAB  #1
+  0059 87           [1]     CLRA  
+  005a 160000       [4]     JSR   delayby1ms
+  158:                                
+  159:                 TIMER_COUNT++;                                         // INCREASE 
+  005d fe0000       [3]     LDX   TIMER_COUNT
+  0060 08           [1]     INX   
+  0061 7e0000       [3]     STX   TIMER_COUNT
+  160:                 
+  161:                 if (TIMER_COUNT == 1000)                               // IF WE'VE REACHED 1000 MSECS IT'S TIME TO UPDATE COUNT 
+  0064 8e03e8       [2]     CPX   #1000
+  0067 2610         [3/1]   BNE   *+18 ;abs = 0079
+  162:                 {
+  163:                      if (DIRECTION == 0xFF) {                          // ARE WE IN DOWN MODE?
+  0069 f60000       [3]     LDAB  DIRECTION
+  006c 04a105       [3]     IBNE  B,*+8 ;abs = 0074
+  164:       	               COUNT_VALUE--;                               //COUNT DOWN BY 1
+  006f 730000       [4]     DEC   COUNT_VALUE
+  165:       	          } else {                                          // ELSE WE'RE IN UP MODE SO
+  0072 2003         [3]     BRA   *+5 ;abs = 0077
+  166:                           COUNT_VALUE++;                               // COUNT UP BY 1
+  0074 720000       [4]     INC   COUNT_VALUE
+  167:                      }
+  168:                 
+  169:                      updateDisplay();                                  //UPDATE OUR DISPLAY
+  0077 0725         [4]     BSR   *+39 ;abs = 009e
+  170:                      
+  171:                      TIMER_COUNT = 0;                                  // RESET OUR TIMER COUNTER
+  172:                 }
+  173:  
+  174:                 if (COUNT_VALUE == 0 || COUNT_VALUE ==100)             //Have we reached 0? 
+  0079 f60000       [3]     LDAB  COUNT_VALUE
+  007c 2704         [3/1]   BEQ   *+6 ;abs = 0082
+  007e c164         [1]     CMPB  #100
+  0080 2685         [3/1]   BNE   *-121 ;abs = 0007
+  175:                 {
+  176:                      COUNT_VALUE = 0;                                  //Reset our count to zero
+  0082 790000       [3]     CLR   COUNT_VALUE
+  177:                      updateDisplay();                                  //Refresh the display
+  0085 160000       [4]     JSR   updateDisplay
+  178:                      blink();                                          //Lets make the display blink a few times
+  0088 160000       [4]     JSR   blink
+  179:                      PAUSE = 0x01;                                     //Pause the system
+  008b c601         [1]     LDAB  #1
+  008d 7b0000       [3]     STAB  PAUSE
+  180:                      TIMER_COUNT = 0;                                  //Reest our timer to zero
+  0090 c7           [1]     CLRB  
+  0091 87           [1]     CLRA  
+  0092 7c0000       [3]     STD   TIMER_COUNT
+  181:                      DIRECTION = 0x00;                                 //DIRECTION UP
+  0095 7b0000       [3]     STAB  DIRECTION
+  182:                      updateDisplay();                                  //Refresh the display
+  0098 160000       [4]     JSR   updateDisplay
+  009b 060000       [3]     JMP   main:0x0007
+  009e 160000       [4]     JSR   updateDisplay
+  00a1 c7           [1]     CLRB  
+  00a2 87           [1]     CLRA  
+  00a3 7c0000       [3]     STD   TIMER_COUNT
+  00a6 3d           [5]     RTS   
+  183:                 }
+  184:            }          
+  185:       } 
+  186:  }                
+  187:  
+  188:  
+  189:  
+  190:  /********************************************************************/
+  191:  /*  This is the initialization controller, it initializes program   */
+  192:  /*  vars & calls other systems to initialize in the hardware        */
+  193:  /********************************************************************/
+  194:  void systemInitialize(void)
+  195:  {
+*** EVALUATION ***
+
+Function: systemInitialize
+Source  : C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\Sources\main.c
+Options : -CPUHCS12 -D_HCS12_SERIALMON -D__NO_FLOAT__ -Env"GENPATH=C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11;C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\bin;C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\prm;C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\cmd;C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\Sources;C:\Program Files (x86)\Freescale\CWS12v5.1\lib\HC12c\lib;C:\Program Files (x86)\Freescale\CWS12v5.1\lib\HC12c\src;C:\Program Files (x86)\Freescale\CWS12v5.1\lib\HC12c\include" -Env"LIBPATH=C:\Program Files (x86)\Freescale\CWS12v5.1\lib\HC12c\include" -Env"OBJPATH=C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\bin" -Env"TEXTPATH=C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\bin" -Lasm=%n.lst -Ms -ObjN="C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\ECE_367_Lab_11_Data\Standard\ObjectCode\main.c.o" -WmsgSd1106
+
+  196:       SetClk8();                                                       // go setup the PLL
+  0000 160000       [4]     JSR   SetClk8
+  197:       
+  198:       // setup the data direction registers
+  199:       DDRM = 0xfc;                                                     // set data direction register for PortM
+  0003 ccf0fc       [2]     LDD   #61692
+  0006 7b0000       [3]     STAB  _DDRM
+  200:       DDRT = 0xf0;                                                     // set data direction register for PortT
+  0009 7a0000       [3]     STAA  _DDRT
+  201:       PORTM = 0;                                                       // clear PortM
+  000c 790250       [3]     CLR   592
+  202:       COUNT_VALUE = 0;                                                 // INITIALIZE COUNT VALUE
+  000f 790000       [3]     CLR   COUNT_VALUE
+  203:  
+  204:       SPIInitialize();                                                 // INITIALIZE THE SPI SYSTEM
+  0012 160000       [4]     JSR   SPIInitialize
+  205:       
+  206:       InitLCD();                                                       // INITIALIZE THE LCD 
+  0015 160000       [4]     JSR   InitLCD
+  207:       
+  208:       DIRECTION = 0x00;                                                //INITIALIZE THE SYSTEM IN UP MODE (0=UP,1=DOWN)
+  0018 790000       [3]     CLR   DIRECTION
+  209:       PAUSE = 0x01;                                                    //INITIALIZE THE SYSTEM IN PAUSE MODE (0=RUNNING,1=PAUSED)
+  001b c601         [1]     LDAB  #1
+  001d 7b0000       [3]     STAB  PAUSE
+  210:       COUNT_VALUE = 0;                                                 //INITIALIZE COUNTER VALUE TO 0
+  0020 790000       [3]     CLR   COUNT_VALUE
+  211:  
+  212:       TIMER_COUNT = 0;                                                 //INITIALIZE TIMER_COUNTER TO ZERO
+  0023 c7           [1]     CLRB  
+  0024 87           [1]     CLRA  
+  0025 7c0000       [3]     STD   TIMER_COUNT
+  213:       
+  214:      
+  215:  }
+  0028 3d           [5]     RTS   
+  216:  
+  217:  
+  218:  
+  219:  /********************************************************************/
+  220:  /* This function enables PLL and use an 8-MHz crystal oscillator to */
+  221:  /* generate 24-MHz E clock. Same as done in assembler.              */
+  222:  /********************************************************************/
+  223:  void SetClk8(void) 
+  224:  {
+*** EVALUATION ***
+
+Function: SetClk8
+Source  : C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\Sources\main.c
+Options : -CPUHCS12 -D_HCS12_SERIALMON -D__NO_FLOAT__ -Env"GENPATH=C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11;C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\bin;C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\prm;C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\cmd;C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\Sources;C:\Program Files (x86)\Freescale\CWS12v5.1\lib\HC12c\lib;C:\Program Files (x86)\Freescale\CWS12v5.1\lib\HC12c\src;C:\Program Files (x86)\Freescale\CWS12v5.1\lib\HC12c\include" -Env"LIBPATH=C:\Program Files (x86)\Freescale\CWS12v5.1\lib\HC12c\include" -Env"OBJPATH=C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\bin" -Env"TEXTPATH=C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\bin" -Lasm=%n.lst -Ms -ObjN="C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\ECE_367_Lab_11_Data\Standard\ObjectCode\main.c.o" -WmsgSd1106
+
+  225:       asm(sei);                                                        // turn of interrupts
+  0000 1410         [1]     SEI   
+  226:       CLKSEL  &= PLLSEL;                                               // disengage PLL from system
+  0002 4d007f       [4]     BCLR  _CLKSEL,#127
+  227:       SYNR    = 0x02;                                                  // set SYSCLK to 24 MHz from a 4-MHz oscillator
+  0005 cc4002       [2]     LDD   #16386
+  0008 5b00         [2]     STAB  _SYNR
+  228:       REFDV   = 0;                                                     //  
+  000a 790000       [3]     CLR   _REFDV
+  229:       PLLCTL  = 0x40;                                                  // turn on PLL, set automatic 
+  000d 5a00         [2]     STAA  _PLLCTL
+  230:       while(!(CRGFLG & LOCK));                                         // wait for HIGN on LOCK bit at address CRGFLG
+  000f 4f0008fc     [4]     BRCLR _CRGFLG,#8,*+0 ;abs = 000f
+  231:       asm(nop);                                                        // very short delays
+  0013 a7           [1]     NOP   
+  232:       asm(nop);                        
+  0014 a7           [1]     NOP   
+  233:       CLKSEL  |= PLLSEL;                                               // clock derived from PLL
+  0015 4c0080       [4]     BSET  _CLKSEL,#128
+  234:       asm(cli);                                                        // turn on interrups
+  0018 10ef         [1]     CLI   
+  235:  }
+  001a 3d           [5]     RTS   
+  236:  
+  237:  
+  238:  
+  239:  /********************************************************************/
+  240:  /*  This subroutine initializes the SPI system on the HC12S         */
+  241:  /*                                                                  */
+  242:  /********************************************************************/
+  243:  void SPIInitialize(void)
+  244:  {
+*** EVALUATION ***
+
+Function: SPIInitialize
+Source  : C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\Sources\main.c
+Options : -CPUHCS12 -D_HCS12_SERIALMON -D__NO_FLOAT__ -Env"GENPATH=C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11;C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\bin;C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\prm;C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\cmd;C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\Sources;C:\Program Files (x86)\Freescale\CWS12v5.1\lib\HC12c\lib;C:\Program Files (x86)\Freescale\CWS12v5.1\lib\HC12c\src;C:\Program Files (x86)\Freescale\CWS12v5.1\lib\HC12c\include" -Env"LIBPATH=C:\Program Files (x86)\Freescale\CWS12v5.1\lib\HC12c\include" -Env"OBJPATH=C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\bin" -Env"TEXTPATH=C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\bin" -Lasm=%n.lst -Ms -ObjN="C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\ECE_367_Lab_11_Data\Standard\ObjectCode\main.c.o" -WmsgSd1106
+
+  245:       SPIB = 0x22;                                                     //SPI CLOCKS A 1/24 OF E-CLOCK
+  0000 cc3b22       [2]     LDD   #15138
+  0003 5bda         [2]     STAB  218
+  246:       DDRM = 0x3B;                                                     //SETUP PORTM DATA DIRECTION
+  0005 7a0000       [3]     STAA  _DDRM
+  247:       SPCR1 = 0x50;                                                    //ENABLE SPI AND SET MODE AS MASTER
+  0008 c650         [1]     LDAB  #80
+  000a 5bd8         [2]     STAB  216
+  248:       SPCR2 = 0x00;                                                    //RESETS SPCR2 TO $00 (ALSO DOES AT RESET)
+  000c 7900d9       [3]     CLR   217
+  249:       PORTM = PORTM | RCK;                                             //SET RCK TO IDLE HIGH
+  000f 1c025008     [4]     BSET  592,#8
+  250:       PORTM = PORTM & ~ENABLE;                                         //ENABLE TO IDLE LOW
+  0013 1d025002     [4]     BCLR  592,#2
+  251:  }
+  0017 3d           [5]     RTS   
+  252:  
+  253:  
+  254:  
+  255:  /********************************************************************/
+  256:  /*  This subroutine initializes the LCD screen                      */
+  257:  /*                                                                  */
+  258:  /********************************************************************/
+  259:  void InitLCD(void)                                                    //Cheap and dirty method to initialize LCD
+  260:  {
+*** EVALUATION ***
+
+Function: InitLCD
+Source  : C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\Sources\main.c
+Options : -CPUHCS12 -D_HCS12_SERIALMON -D__NO_FLOAT__ -Env"GENPATH=C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11;C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\bin;C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\prm;C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\cmd;C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\Sources;C:\Program Files (x86)\Freescale\CWS12v5.1\lib\HC12c\lib;C:\Program Files (x86)\Freescale\CWS12v5.1\lib\HC12c\src;C:\Program Files (x86)\Freescale\CWS12v5.1\lib\HC12c\include" -Env"LIBPATH=C:\Program Files (x86)\Freescale\CWS12v5.1\lib\HC12c\include" -Env"OBJPATH=C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\bin" -Env"TEXTPATH=C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\bin" -Lasm=%n.lst -Ms -ObjN="C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\ECE_367_Lab_11_Data\Standard\ObjectCode\main.c.o" -WmsgSd1106
+
+  261:  	Command(0x30);                                                   //Call command method with 0x30
+  0000 c630         [1]     LDAB  #48
+  0002 0715         [4]     BSR   *+23 ;abs = 0019
+  262:  	delay3();                                                        //Allow the command to take place
+  263:  	Command(0x30);                                                   //Call command method with 0x30
+  0004 c630         [1]     LDAB  #48
+  0006 0711         [4]     BSR   *+19 ;abs = 0019
+  264:  	delay3();                                                        //Allow the command to take place
+  265:  	Command(0x30);                                                   //Call command method with 0x30
+  0008 c630         [1]     LDAB  #48
+  000a 070d         [4]     BSR   *+15 ;abs = 0019
+  266:  	delay3();                                                        //Allow the command to take place
+  267:  	Command(0x38);                                                   //Call command method with 0x38
+  000c c638         [1]     LDAB  #56
+  000e 0709         [4]     BSR   *+11 ;abs = 0019
+  268:  	delay3();                                                        //Allow the command to take place
+  269:  	Command(0x0C);                                                   //Call command method with 0x0C
+  0010 c60c         [1]     LDAB  #12
+  0012 160000       [4]     JSR   Command
+  270:  	Clear();                                                         //Clear the homescreen
+  0015 160000       [4]     JSR   Clear
+  271:  }
+  0018 3d           [5]     RTS   
+  0019 160000       [4]     JSR   Command
+  001c 060000       [3]     JMP   delay3
+  272:  
+  273:  
+  274:  /*********************************************************************************/
+  275:  /*                                                                               */
+  276:  /* The getkey functions gets the key value from a 4X4 matrix keypad connected    */
+  277:  /* PortT. Rows (0,1,2,3) = P4,P5,P6,P7                                           */
+  278:  /*     Columns (0,1,2,3) = P0,P1,P2,P3                                           */
+  279:  /* The strategy used here is nessted if -else statements and is similar to what  */
+  280:  /* we did in assembly language. There are more efficient and elegant strategies. */
+  281:  /*                                                                               */
+  282:  /*********************************************************************************/
+  283:  char getkey(void)
+  284:  {                                                                     // We test the keys in sequence - row 0 columns 0,1,2,3
+*** EVALUATION ***
+
+Function: getkey
+Source  : C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\Sources\main.c
+Options : -CPUHCS12 -D_HCS12_SERIALMON -D__NO_FLOAT__ -Env"GENPATH=C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11;C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\bin;C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\prm;C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\cmd;C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\Sources;C:\Program Files (x86)\Freescale\CWS12v5.1\lib\HC12c\lib;C:\Program Files (x86)\Freescale\CWS12v5.1\lib\HC12c\src;C:\Program Files (x86)\Freescale\CWS12v5.1\lib\HC12c\include" -Env"LIBPATH=C:\Program Files (x86)\Freescale\CWS12v5.1\lib\HC12c\include" -Env"OBJPATH=C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\bin" -Env"TEXTPATH=C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\bin" -Lasm=%n.lst -Ms -ObjN="C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\ECE_367_Lab_11_Data\Standard\ObjectCode\main.c.o" -WmsgSd1106
+
+  0000 36           [2]     PSHA  
+  285:                                                                        // row 2 columns 0,1,2,3 etc. until we have checked
+  286:     char keyX;                                                         // all of the keys. If a key is pressed then we save the 
+  287:                                                                        // value in keyX and jump down to return without
+  288:                                                                        // checking any more keys.  Note that there many
+  289:                                                                        // more ways to do this.
+  290:  
+  291:     PORTT = 0x00;                                                      // clear portT
+  0001 790240       [3]     CLR   576
+  292:     asm(NOP);                                                          // short wait times with assembler NOP
+  0004 a7           [1]     NOP   
+  293:     PORTT |= 0x10;                                                     // PORTT = PORTT | 0x10; OR PORTT with $10. ie. set row 0 (PT4) High
+  0005 1c024010     [4]     BSET  576,#16
+  294:     asm(nop);
+  0009 a7           [1]     NOP   
+  295:     asm(nop);
+  000a a7           [1]     NOP   
+  296:     asm(nop);
+  000b a7           [1]     NOP   
+  297:     
+  298:     if(PORTT & BIT0)                                                   // AND PORT with 0x01 and check if ans is 1 (TRUE). ie. Check column 0 for HIGH. If High
+  000c 1f02400104   [5]     BRCLR 576,#1,*+9 ;abs = 0015
+  299:             keyX = 1;                                                  // then set keyX to 1 and jump to return.
+  0011 c601         [1]     LDAB  #1
+  0013 2047         [3]     BRA   *+73 ;abs = 005c
+  300:     else if(PORTT & BIT1)                                              // Check column 1
+  0015 1f02400204   [5]     BRCLR 576,#2,*+9 ;abs = 001e
+  301:             keyX = 2;
+  001a c602         [1]     LDAB  #2
+  001c 203e         [3]     BRA   *+64 ;abs = 005c
+  302:     else if(PORTT & BIT2)                                              // Check column 2
+  001e 1f02400404   [5]     BRCLR 576,#4,*+9 ;abs = 0027
+  303:             keyX = 3;
+  0023 c603         [1]     LDAB  #3
+  0025 2035         [3]     BRA   *+55 ;abs = 005c
+  304:     else if(PORTT & BIT3)                                              // Check column 3
+  0027 1f02400804   [5]     BRCLR 576,#8,*+9 ;abs = 0030
+  305:             keyX = 10;
+  002c c60a         [1]     LDAB  #10
+  002e 202c         [3]     BRA   *+46 ;abs = 005c
+  306:     else {
+  307:            PORTT = 0x00;                                               // Clear PortT and start on row 1
+  0030 790240       [3]     CLR   576
+  308:            PORTT |= 0x20;                                              //  Set row 1 High
+  0033 1c024020     [4]     BSET  576,#32
+  309:            asm(nop);
+  0037 a7           [1]     NOP   
+  310:            asm(nop);
+  0038 a7           [1]     NOP   
+  311:            asm(nop);
+  0039 a7           [1]     NOP   
+  312:     
+  313:            if(PORTT & BIT0)                                            // Check column 0 etc., etc.
+  003a 1f02400104   [5]     BRCLR 576,#1,*+9 ;abs = 0043
+  314:             keyX = 4;
+  003f c604         [1]     LDAB  #4
+  0041 2078         [3]     BRA   *+122 ;abs = 00bb
+  315:            else if(PORTT & BIT1) 
+  0043 1f02400204   [5]     BRCLR 576,#2,*+9 ;abs = 004c
+  316:             keyX = 5;
+  0048 c605         [1]     LDAB  #5
+  004a 206f         [3]     BRA   *+113 ;abs = 00bb
+  317:            else if(PORTT & BIT2) 
+  004c 1f02400404   [5]     BRCLR 576,#4,*+9 ;abs = 0055
+  318:             keyX = 6;
+  0051 c606         [1]     LDAB  #6
+  0053 2066         [3]     BRA   *+104 ;abs = 00bb
+  319:            else if(PORTT & BIT3) 
+  0055 1f02400804   [5]     BRCLR 576,#8,*+9 ;abs = 005e
+  320:             keyX = 11;
+  005a c60b         [1]     LDAB  #11
+  005c 205d         [3]     BRA   *+95 ;abs = 00bb
+  321:            else {
+  322:                PORTT = 0x00;
+  005e 790240       [3]     CLR   576
+  323:                PORTT |= 0x40;                                          // row 2 High
+  0061 1c024040     [4]     BSET  576,#64
+  324:                asm(nop);
+  0065 a7           [1]     NOP   
+  325:                asm(nop);
+  0066 a7           [1]     NOP   
+  326:                asm(nop);
+  0067 a7           [1]     NOP   
+  327:     
+  328:                if(PORTT & BIT0) 
+  0068 1f02400104   [5]     BRCLR 576,#1,*+9 ;abs = 0071
+  329:                  keyX = 7;
+  006d c607         [1]     LDAB  #7
+  006f 204a         [3]     BRA   *+76 ;abs = 00bb
+  330:                else if(PORTT & BIT1) 
+  0071 1f02400204   [5]     BRCLR 576,#2,*+9 ;abs = 007a
+  331:                  keyX = 8;
+  0076 c608         [1]     LDAB  #8
+  0078 2041         [3]     BRA   *+67 ;abs = 00bb
+  332:                else if(PORTT & BIT2) 
+  007a 1f02400404   [5]     BRCLR 576,#4,*+9 ;abs = 0083
+  333:                  keyX = 9;
+  007f c609         [1]     LDAB  #9
+  0081 2038         [3]     BRA   *+58 ;abs = 00bb
+  334:                else if(PORTT & BIT3)
+  0083 1f02400804   [5]     BRCLR 576,#8,*+9 ;abs = 008c
+  335:                  keyX = 12;
+  0088 c60c         [1]     LDAB  #12
+  008a 202f         [3]     BRA   *+49 ;abs = 00bb
+  336:                else {
+  337:                  PORTT = 0x00;
+  008c 790240       [3]     CLR   576
+  338:                  PORTT |= 0x80;                                        // row 3 High
+  008f 1c024080     [4]     BSET  576,#128
+  339:                  asm(nop);
+  0093 a7           [1]     NOP   
+  340:                  asm(nop);
+  0094 a7           [1]     NOP   
+  341:                  asm(nop);
+  0095 a7           [1]     NOP   
+  342:     
+  343:                  if(PORTT & BIT0) 
+  0096 1f02400104   [5]     BRCLR 576,#1,*+9 ;abs = 009f
+  344:                    keyX = 0 ;
+  009b 6980         [2]     CLR   0,SP
+  009d 201e         [3]     BRA   *+32 ;abs = 00bd
+  345:                  else if(PORTT & BIT1)
+  009f 1f02400204   [5]     BRCLR 576,#2,*+9 ;abs = 00a8
+  346:                    keyX = 15;
+  00a4 c60f         [1]     LDAB  #15
+  00a6 2013         [3]     BRA   *+21 ;abs = 00bb
+  347:                  else if(PORTT & BIT2) 
+  00a8 1f02400404   [5]     BRCLR 576,#4,*+9 ;abs = 00b1
+  348:                    keyX = 14;
+  00ad c60e         [1]     LDAB  #14
+  00af 200a         [3]     BRA   *+12 ;abs = 00bb
+  349:                  else if(PORTT & BIT3) 
+  00b1 1f02400803   [5]     BRCLR 576,#8,*+8 ;abs = 00b9
+  350:                    keyX = 13; 
+  00b6 c60d         [1]     LDAB  #13
+  00b8 8f           [2]     SKIP2 
+  351:                  else                                                  // if we get to here ==> no key pressed
+  352:                    keyX = 0x1f;                                        // nokey signal
+  00b9 c61f         [1]     LDAB  #31
+  00bb 6b80         [2]     STAB  0,SP
+  353:                }
+  354:            }
+  355:     }
+  356:     return (keyX);                                                     // return the key value
+  00bd e680         [3]     LDAB  0,SP
+  357:  }
+  00bf 32           [3]     PULA  
+  00c0 3d           [5]     RTS   
+  358:  
+  359:  /************************************************************/
+  360:  /*                                                          */
+  361:  /* Key release routine. Check each coulmn bit. If HIGH wait */
+  362:  /* until it goes LOW to break out of the while statement.   */
+  363:  /* Note that we are reading the input register of PortT     */
+  364:  /* which is at address $0241 and is called (here) PORTTi    */
+  365:  /*                                                          */
+  366:  /************************************************************/
+  367:  void keyrelease(void) 
+  368:  {          
+*** EVALUATION ***
+
+Function: keyrelease
+Source  : C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\Sources\main.c
+Options : -CPUHCS12 -D_HCS12_SERIALMON -D__NO_FLOAT__ -Env"GENPATH=C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11;C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\bin;C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\prm;C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\cmd;C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\Sources;C:\Program Files (x86)\Freescale\CWS12v5.1\lib\HC12c\lib;C:\Program Files (x86)\Freescale\CWS12v5.1\lib\HC12c\src;C:\Program Files (x86)\Freescale\CWS12v5.1\lib\HC12c\include" -Env"LIBPATH=C:\Program Files (x86)\Freescale\CWS12v5.1\lib\HC12c\include" -Env"OBJPATH=C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\bin" -Env"TEXTPATH=C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\bin" -Lasm=%n.lst -Ms -ObjN="C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\ECE_367_Lab_11_Data\Standard\ObjectCode\main.c.o" -WmsgSd1106
+
+  369:       //PORTT = 0xf0                                                   // Set all rows high (not needed here. Why?)
+  370:       while((PORTTi & 0x01));                                          // if column 0 is HIGH wait here until LOW 
+  0000 1e024101fb   [5]     BRSET 577,#1,*+0 ;abs = 0000
+  371:       while((PORTTi & 0x02));                                          // if column 1 is HIGH wait here until LOW 
+  0005 1e024102fb   [5]     BRSET 577,#2,*+0 ;abs = 0005
+  372:       while((PORTTi & 0x04));                                          // if column 2 is HIGH wait here until LOW 
+  000a 1e024104fb   [5]     BRSET 577,#4,*+0 ;abs = 000a
+  373:       while((PORTTi & 0x08));                                          // if column 3 is HIGH wait here until LOW  
+  000f 1e024108fb   [5]     BRSET 577,#8,*+0 ;abs = 000f
+  374:  }
+  0014 3d           [5]     RTS   
+  375:  
+  376:  
+  377:  
+  378:  /********************************************************************/
+  379:  /*  This subroutine creates a small delay which counts clock cycles */
+  380:  /*                                                                  */
+  381:  /********************************************************************/
+  382:  void delay(void)                                                      //This will be the delay for LCD commands - count clock cycles
+  383:  {
+*** EVALUATION ***
+
+Function: delay
+Source  : C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\Sources\main.c
+Options : -CPUHCS12 -D_HCS12_SERIALMON -D__NO_FLOAT__ -Env"GENPATH=C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11;C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\bin;C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\prm;C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\cmd;C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\Sources;C:\Program Files (x86)\Freescale\CWS12v5.1\lib\HC12c\lib;C:\Program Files (x86)\Freescale\CWS12v5.1\lib\HC12c\src;C:\Program Files (x86)\Freescale\CWS12v5.1\lib\HC12c\include" -Env"LIBPATH=C:\Program Files (x86)\Freescale\CWS12v5.1\lib\HC12c\include" -Env"OBJPATH=C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\bin" -Env"TEXTPATH=C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\bin" -Lasm=%n.lst -Ms -ObjN="C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\ECE_367_Lab_11_Data\Standard\ObjectCode\main.c.o" -WmsgSd1106
+
+  384:       int y = 8000;                                                    //Initialize Y as 8000
+  0000 cc1f40       [2]     LDD   #8000
+  0003 3b           [2]     PSHD  
+  385:  	int i = 0;                                                       //Initialize i as 0
+  386:  	for(i; i<=y;i++);                                                //Do the delay 8000 times
+  0004 ce0000       [2]     LDX   #0
+  0007 08           [1]     INX   
+  0008 ae80         [3]     CPX   0,SP
+  000a 2ffb         [3/1]   BLE   *-3 ;abs = 0007
+  387:  }
+  000c 3a           [3]     PULD  
+  000d 3d           [5]     RTS   
+  388:  
+  389:  
+  390:  
+  391:  /********************************************************************/
+  392:  /*  This is a slightly larger delay than delay(), it uses a nested  */
+  393:  /*  loop to increase the time spent here                            */
+  394:  /********************************************************************/
+  395:  void delay3(void)                                                     //This delay has nested while loops - count clock cycles
+  396:  {
+*** EVALUATION ***
+
+Function: delay3
+Source  : C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\Sources\main.c
+Options : -CPUHCS12 -D_HCS12_SERIALMON -D__NO_FLOAT__ -Env"GENPATH=C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11;C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\bin;C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\prm;C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\cmd;C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\Sources;C:\Program Files (x86)\Freescale\CWS12v5.1\lib\HC12c\lib;C:\Program Files (x86)\Freescale\CWS12v5.1\lib\HC12c\src;C:\Program Files (x86)\Freescale\CWS12v5.1\lib\HC12c\include" -Env"LIBPATH=C:\Program Files (x86)\Freescale\CWS12v5.1\lib\HC12c\include" -Env"OBJPATH=C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\bin" -Env"TEXTPATH=C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\bin" -Lasm=%n.lst -Ms -ObjN="C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\ECE_367_Lab_11_Data\Standard\ObjectCode\main.c.o" -WmsgSd1106
+
+  397:  	int y = 0x0F;                                                    //Iniialize Y as $0F
+  0000 c60f         [1]     LDAB  #15
+  0002 87           [1]     CLRA  
+  0003 3b           [2]     PSHD  
+  398:  	while (y!=0){                                                    //Loop while Y!=0
+  399:  		int x = 0xFFFF;                                             //Initialize X as $FFFF
+  400:  		while(x!=0){                                                //Loop while X!=0
+  0004 ceffff       [2]     LDX   #65535
+  0007 0435fd       [3]     DBNE  X,*+0 ;abs = 0007
+  401:  			x--;                                                   //Decrement X
+  402:  		}
+  403:  		y--;                                                        //Decrement Y
+  000a ee80         [3]     LDX   0,SP
+  000c 09           [1]     DEX   
+  000d 6e80         [2]     STX   0,SP
+  000f 26f3         [3/1]   BNE   *-11 ;abs = 0004
+  404:  	}
+  405:  }
+  0011 3a           [3]     PULD  
+  0012 3d           [5]     RTS   
+  406:  
+  407:  
+  408:  
+  409:  /*********************************************************************/
+  410:  /* The following function creates a time delay which is equal to the */
+  411:  /* multiple of 1ms. The value passed in k specifies the number of    */
+  412:  /* milliseconds to be delayed.                                       */
+  413:  /*********************************************************************/
+  414:  void delayby1ms(int k)                                                // k*1ms delay with embedded key press check
+  415:  {
+*** EVALUATION ***
+
+Function: delayby1ms
+Source  : C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\Sources\main.c
+Options : -CPUHCS12 -D_HCS12_SERIALMON -D__NO_FLOAT__ -Env"GENPATH=C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11;C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\bin;C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\prm;C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\cmd;C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\Sources;C:\Program Files (x86)\Freescale\CWS12v5.1\lib\HC12c\lib;C:\Program Files (x86)\Freescale\CWS12v5.1\lib\HC12c\src;C:\Program Files (x86)\Freescale\CWS12v5.1\lib\HC12c\include" -Env"LIBPATH=C:\Program Files (x86)\Freescale\CWS12v5.1\lib\HC12c\include" -Env"OBJPATH=C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\bin" -Env"TEXTPATH=C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\bin" -Lasm=%n.lst -Ms -ObjN="C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\ECE_367_Lab_11_Data\Standard\ObjectCode\main.c.o" -WmsgSd1106
+
+  0000 6cac         [2]     STD   4,-SP
+  416:       /* Standard Timer Setup */
+  417:  	int ix;
+  418:  	
+  419:  	TSCR1 = 0x90;                                                    /* enable TCNT and fast timer flag clear */
+  0002 cc0690       [2]     LDD   #1680
+  0005 5b00         [2]     STAB  _TSCR1
+  420:  	TSCR2 = 0x06;                                                    /* disable timer interrupt, set prescaler to 64 */
+  0007 5a00         [2]     STAA  _TSCR2
+  421:  	TIOS  |= BIT0;                                                   /* enable OC0 */
+  0009 4c0001       [4]     BSET  _TIOS,#1
+  422:  	TFLG1 &= BIT0;                                                   /* clear timer flag OC0F*/
+  000c 4d00fe       [4]     BCLR  _TFLG1,#254
+  423:  	TC0 = TCNT + 375;                                                /* add 375 to the tcount*/
+  000f dc00         [3]     LDD   _TCNT
+  0011 c30177       [2]     ADDD  #375
+  0014 5c00         [2]     STD   _TC0
+  424:  
+  425:  	for(ix = 0; ix < k; ix++)                                        // Do this loop k times. Where k*1ms is the ~time wait we need. Not necessarily 1 second.
+  0016 c7           [1]     CLRB  
+  0017 87           [1]     CLRA  
+  0018 6c82         [2]     STD   2,SP
+  001a 2010         [3]     BRA   *+18 ;abs = 002c
+  426:  	{
+  427:  	     while(!(TFLG1 & BIT0));                                     // ASM==> Here BRCLR TFLAG1, $01, Here
+  001c 4f0001fc     [4]     BRCLR _TFLG1,#1,*+0 ;abs = 001c
+  428:  		TC0 += 375;                                                 // If we get here TFLAG1's BIT0 became HIGH
+  0020 dc00         [3]     LDD   _TC0
+  0022 c30177       [2]     ADDD  #375
+  0025 5c00         [2]     STD   _TC0
+  0027 ee82         [3]     LDX   2,SP
+  0029 08           [1]     INX   
+  002a 6e82         [2]     STX   2,SP
+  002c ec82         [3]     LDD   2,SP
+  002e ac80         [3]     CPD   0,SP
+  0030 2dea         [3/1]   BLT   *-20 ;abs = 001c
+  429:       }
+  430:  	TIOS  &= (~BIT0);                                                /* disable OC0  and exit.  note no return statement required*/
+  0032 4d0001       [4]     BCLR  _TIOS,#1
+  431:  }
+  0035 1b84         [2]     LEAS  4,SP
+  0037 3d           [5]     RTS   
+  432:  
+  433:  
+  434:  
+  435:  /********************************************************************/
+  436:  /*  This function clears the LCD screen                             */
+  437:  /*                                                                  */
+  438:  /********************************************************************/
+  439:  void Clear(void)                                                      //Clears the LCD screen
+  440:  {
+*** EVALUATION ***
+
+Function: Clear
+Source  : C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\Sources\main.c
+Options : -CPUHCS12 -D_HCS12_SERIALMON -D__NO_FLOAT__ -Env"GENPATH=C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11;C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\bin;C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\prm;C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\cmd;C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\Sources;C:\Program Files (x86)\Freescale\CWS12v5.1\lib\HC12c\lib;C:\Program Files (x86)\Freescale\CWS12v5.1\lib\HC12c\src;C:\Program Files (x86)\Freescale\CWS12v5.1\lib\HC12c\include" -Env"LIBPATH=C:\Program Files (x86)\Freescale\CWS12v5.1\lib\HC12c\include" -Env"OBJPATH=C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\bin" -Env"TEXTPATH=C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\bin" -Lasm=%n.lst -Ms -ObjN="C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\ECE_367_Lab_11_Data\Standard\ObjectCode\main.c.o" -WmsgSd1106
+
+  441:  	Command(0x01);                                                   //Sends the clear command to LCD
+  0000 c601         [1]     LDAB  #1
+  0002 160000       [4]     JSR   Command
+  442:  	delay();                                                         //Allows the command to go through
+  0005 0700         [4]     BSR   delay
+  443:  	delay();                                                         //Allows the command to go through
+  0007 060000       [3]     JMP   delay
+  444:  }
+  445:  
+  446:  
+  447:       
+  448:  /********************************************************************/
+  449:  /*  This subroutine sends a command to the LCD, for example to move */
+  450:  /*  the cursor to the beginning of the screen                       */
+  451:  /********************************************************************/
+  452:  void Command(char a)                                                  //Method to send commands to LCD via SPI to SIPO system
+  453:  {
+*** EVALUATION ***
+
+Function: Command
+Source  : C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\Sources\main.c
+Options : -CPUHCS12 -D_HCS12_SERIALMON -D__NO_FLOAT__ -Env"GENPATH=C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11;C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\bin;C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\prm;C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\cmd;C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\Sources;C:\Program Files (x86)\Freescale\CWS12v5.1\lib\HC12c\lib;C:\Program Files (x86)\Freescale\CWS12v5.1\lib\HC12c\src;C:\Program Files (x86)\Freescale\CWS12v5.1\lib\HC12c\include" -Env"LIBPATH=C:\Program Files (x86)\Freescale\CWS12v5.1\lib\HC12c\include" -Env"OBJPATH=C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\bin" -Env"TEXTPATH=C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\bin" -Lasm=%n.lst -Ms -ObjN="C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\ECE_367_Lab_11_Data\Standard\ObjectCode\main.c.o" -WmsgSd1106
+
+  0000 37           [2]     PSHB  
+  454:  	while(!(SPISR & 0x20));                                          //Wait for register empty flag (SPIEF)
+  0001 4f0020fc     [4]     BRCLR _SPISR,#32,*+0 ;abs = 0001
+  455:  	SPIDR = a;                                                       //Output command via SPI to SIPO
+  0005 e680         [3]     LDAB  0,SP
+  0007 5b00         [2]     STAB  _SPIDR
+  456:  	while(!(SPISR & 0x80));                                          //Wait for SPI Flag
+  0009 4f0080fc     [4]     BRCLR _SPISR,#128,*+0 ;abs = 0009
+  457:  	a = SPIDR;                                                       //Equate a with SPIDR
+  000d d600         [3]     LDAB  _SPIDR
+  000f 6b80         [2]     STAB  0,SP
+  458:  	asm(nop);                                                        //Wait for 1 cycle
+  0011 a7           [1]     NOP   
+  459:  	PORTM &= ~RCK;                                                   //Pulse RCK
+  0012 1d025008     [4]     BCLR  592,#8
+  460:  	asm(nop);                                                        //Wait for 1 cycle
+  0016 a7           [1]     NOP   
+  461:  	asm(nop);                                                        //Wait for 1 cycle
+  0017 a7           [1]     NOP   
+  462:  	PORTM |= RCK;                                                    //Command now available for LCD
+  0018 1c025008     [4]     BSET  592,#8
+  463:  	PORTM &= ~RS;                                                    //RS = 0 for commands
+  001c 1d025001     [4]     BCLR  592,#1
+  464:  	asm(nop);                                                        //Wait for 1 cycle
+  0020 a7           [1]     NOP   
+  465:  	asm(nop);                                                        //Wait for 1 cycle
+  0021 a7           [1]     NOP   
+  466:  	asm(nop);                                                        //Wait for 1 cycle
+  0022 a7           [1]     NOP   
+  467:  	PORTM |= ENABLE;                                                 //Fire ENABLE
+  0023 1c025002     [4]     BSET  592,#2
+  468:  	asm(nop);                                                        //Wait for 1 cycle
+  0027 a7           [1]     NOP   
+  469:  	asm(nop);                                                        //Wait for 1 cycle
+  0028 a7           [1]     NOP   
+  470:  	PORTM &= ~ENABLE;                                                //ENABLE off
+  0029 1d025002     [4]     BCLR  592,#2
+  471:  	delay();                                                         //Delay
+  002d 160000       [4]     JSR   delay
+  472:  	delay();                                                         //Delay
+  0030 160000       [4]     JSR   delay
+  473:  }
+  0033 32           [3]     PULA  
+  0034 3d           [5]     RTS   
+  474:  
+  475:  
+  476:  
+  477:  /********************************************************************/
+  478:  /*  This subroutine prints an ASCII character to the screen         */
+  479:  /*                                                                  */
+  480:  /********************************************************************/
+  481:  void Print(char a)                                                    // Method to send data to LCD via SPI to SIPO system
+  482:  {
+*** EVALUATION ***
+
+Function: Print
+Source  : C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\Sources\main.c
+Options : -CPUHCS12 -D_HCS12_SERIALMON -D__NO_FLOAT__ -Env"GENPATH=C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11;C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\bin;C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\prm;C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\cmd;C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\Sources;C:\Program Files (x86)\Freescale\CWS12v5.1\lib\HC12c\lib;C:\Program Files (x86)\Freescale\CWS12v5.1\lib\HC12c\src;C:\Program Files (x86)\Freescale\CWS12v5.1\lib\HC12c\include" -Env"LIBPATH=C:\Program Files (x86)\Freescale\CWS12v5.1\lib\HC12c\include" -Env"OBJPATH=C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\bin" -Env"TEXTPATH=C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\bin" -Lasm=%n.lst -Ms -ObjN="C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\ECE_367_Lab_11_Data\Standard\ObjectCode\main.c.o" -WmsgSd1106
+
+  0000 37           [2]     PSHB  
+  483:  	while(!(SPISR & 0x20));                                          //Wait for register empty flag (SPIEF)
+  0001 4f0020fc     [4]     BRCLR _SPISR,#32,*+0 ;abs = 0001
+  484:  	SPIDR = a;                                                       //Output command via SPI to SIPO
+  0005 e680         [3]     LDAB  0,SP
+  0007 5b00         [2]     STAB  _SPIDR
+  485:  	while(!(SPISR & 0x80));                                          //Wait for SPI Flag
+  0009 4f0080fc     [4]     BRCLR _SPISR,#128,*+0 ;abs = 0009
+  486:  	a = SPIDR;                                                       //Equate a with SPIDR
+  000d d600         [3]     LDAB  _SPIDR
+  000f 6b80         [2]     STAB  0,SP
+  487:  	asm(nop);                                                        //Wait for 1 cycle
+  0011 a7           [1]     NOP   
+  488:  	PORTM &= ~RCK;                                                   //Pulse RCK
+  0012 1d025008     [4]     BCLR  592,#8
+  489:  	asm(nop);                                                        //Wait for 1 cycle
+  0016 a7           [1]     NOP   
+  490:  	asm(nop);                                                        //Wait for 1 cycle
+  0017 a7           [1]     NOP   
+  491:  	PORTM |= RCK;                                                    //Command now available for LCD
+  0018 1c025008     [4]     BSET  592,#8
+  492:  	PORTM |= RS;                                                     //RS = 1 for data
+  001c 1c025001     [4]     BSET  592,#1
+  493:  	asm(nop);                                                        //Wait for 1 cycle
+  0020 a7           [1]     NOP   
+  494:  	asm(nop);                                                        //Wait for 1 cycle
+  0021 a7           [1]     NOP   
+  495:  	asm(nop);                                                        //Wait for 1 cycle
+  0022 a7           [1]     NOP   
+  496:  	PORTM |= ENABLE;                                                 //Fire ENABLE
+  0023 1c025002     [4]     BSET  592,#2
+  497:  	asm(nop);                                                        //Wait for 1 cycle
+  0027 a7           [1]     NOP   
+  498:  	asm(nop);                                                        //Wait for 1 cycle
+  0028 a7           [1]     NOP   
+  499:  	PORTM &= ~ENABLE;                                                //ENABLE off
+  0029 1d025002     [4]     BCLR  592,#2
+  500:  	delay();                                                         //Delay
+  002d 160000       [4]     JSR   delay
+  501:  	delay();                                                         //Delay
+  0030 160000       [4]     JSR   delay
+  502:  }
+  0033 32           [3]     PULA  
+  0034 3d           [5]     RTS   
+  503:  
+  504:  
+  505:  
+  506:  /********************************************************************/
+  507:  /*  This function updates the display by printing characters and    */
+  508:  /*  Commands to it                                                  */
+  509:  /********************************************************************/
+  510:  void updateDisplay(void)
+  511:  {
+*** EVALUATION ***
+
+Function: updateDisplay
+Source  : C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\Sources\main.c
+Options : -CPUHCS12 -D_HCS12_SERIALMON -D__NO_FLOAT__ -Env"GENPATH=C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11;C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\bin;C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\prm;C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\cmd;C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\Sources;C:\Program Files (x86)\Freescale\CWS12v5.1\lib\HC12c\lib;C:\Program Files (x86)\Freescale\CWS12v5.1\lib\HC12c\src;C:\Program Files (x86)\Freescale\CWS12v5.1\lib\HC12c\include" -Env"LIBPATH=C:\Program Files (x86)\Freescale\CWS12v5.1\lib\HC12c\include" -Env"OBJPATH=C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\bin" -Env"TEXTPATH=C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\bin" -Lasm=%n.lst -Ms -ObjN="C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\ECE_367_Lab_11_Data\Standard\ObjectCode\main.c.o" -WmsgSd1106
+
+  512:       //CLEAR THE DISPLAY
+  513:       Clear();                                                    //Clear the display
+  0000 0700         [4]     BSR   Clear
+  514:       
+  515:       //Set to home position
+  516:       Command(0x02);                                              //Move cursor to home positioin
+  0002 c602         [1]     LDAB  #2
+  0004 0700         [4]     BSR   Command
+  517:       
+  518:  	// display Run/Pause
+  519:  	if (PAUSE == 0x01) {
+  0006 f60000       [3]     LDAB  PAUSE
+  0009 042114       [3]     DBNE  B,*+23 ;abs = 0020
+  520:  	     Print(0x50);                                           //Print a "P"
+  000c c650         [1]     LDAB  #80
+  000e 0700         [4]     BSR   Print
+  521:  	     Print(0x41);                                           //Print a "A"
+  0010 c641         [1]     LDAB  #65
+  0012 0758         [4]     BSR   *+90 ;abs = 006c
+  522:  	     Print(0x55);                                           //Print a "U"
+  523:  	     Print(0x53);                                           //Print a "S"
+  0014 c653         [1]     LDAB  #83
+  0016 0700         [4]     BSR   Print
+  524:  	     Print(0x45);                                           //Print a "E"
+  0018 c645         [1]     LDAB  #69
+  001a 0758         [4]     BSR   *+90 ;abs = 0074
+  525:  	     Print(0x44);                                           //Print a "D"     
+  526:  	     Print(0x20);                                           //Print a " "  
+  001c c620         [1]     LDAB  #32
+  527:  	} else {
+  001e 200e         [3]     BRA   *+16 ;abs = 002e
+  528:  	     Print(0x52);                                           //Print a "R"
+  0020 c652         [1]     LDAB  #82
+  0022 0748         [4]     BSR   *+74 ;abs = 006c
+  529:  	     Print(0x55);                                           //Print a "U"
+  530:  	     Print(0x4E);                                           //Print a "N"
+  0024 c64e         [1]     LDAB  #78
+  0026 0754         [4]     BSR   *+86 ;abs = 007c
+  531:  	     Print(0x4E);                                           //Print a "N"
+  532:  	     Print(0x49);                                           //Print a "I"
+  0028 c649         [1]     LDAB  #73
+  002a 0750         [4]     BSR   *+82 ;abs = 007c
+  533:  	     Print(0x4E);                                           //Print a "N"     
+  534:  	     Print(0x47);                                           //Print a "G"     
+  002c c647         [1]     LDAB  #71
+  002e 0700         [4]     BSR   Print
+  535:  	}
+  536:  	
+  537:  	// display Direction (up/down)
+  538:  	if (DIRECTION == 0xFF) {
+  0030 f60000       [3]     LDAB  DIRECTION
+  0033 04a114       [3]     IBNE  B,*+23 ;abs = 004a
+  539:  	     //COUNT DOWN
+  540:  	     Print(0x20);                                           //Print a " "  
+  0036 c620         [1]     LDAB  #32
+  0038 0727         [4]     BSR   *+41 ;abs = 0061
+  541:  	     Print(0x20);                                           //Print a " "  
+  542:  	     Print(0x20);                                           //Print a " "  
+  003a 0725         [4]     BSR   *+39 ;abs = 0061
+  543:  	     Print(0x20);                                           //Print a " "  
+  544:  	     Print(0x20);                                           //Print a " "  
+  003c 0736         [4]     BSR   *+56 ;abs = 0074
+  545:  	     Print(0x44);                                           //Print a "D"  
+  546:  	     Print(0x4F);                                           //Print a "O"  
+  003e c64f         [1]     LDAB  #79
+  0040 0700         [4]     BSR   Print
+  547:  	     Print(0x57);                                           //Print a "W"
+  0042 c657         [1]     LDAB  #87
+  0044 0700         [4]     BSR   Print
+  548:  	     Print(0x4E);                                           //Print a "N"     
+  0046 c64e         [1]     LDAB  #78
+  549:  	} else {
+  0048 200c         [3]     BRA   *+14 ;abs = 0056
+  550:  	     //COUNT UP
+  551:  	     Print(0x20);                                           //Print a " "  
+  004a c620         [1]     LDAB  #32
+  004c 0713         [4]     BSR   *+21 ;abs = 0061
+  552:  	     Print(0x20);                                           //Print a " "  
+  553:  	     Print(0x20);                                           //Print a " "  
+  004e 0711         [4]     BSR   *+19 ;abs = 0061
+  554:  	     Print(0x20);                                           //Print a " "  
+  555:  	     Print(0x20);                                           //Print a " "  
+  0050 070f         [4]     BSR   *+17 ;abs = 0061
+  556:  	     Print(0x20);                                           //Print a " "  
+  557:  	     Print(0x20);                                           //Print a " "  
+  0052 0718         [4]     BSR   *+26 ;abs = 006c
+  558:  	     Print(0x55);                                           //Print a "U"
+  559:  	     Print(0x50);                                           //Print a "P"
+  0054 c650         [1]     LDAB  #80
+  0056 160000       [4]     JSR   Print
+  560:       }
+  561:  
+  562:  	Command(0xC0);										//NEW LINE
+  0059 c6c0         [1]     LDAB  #192
+  005b 160000       [4]     JSR   Command
+  563:  	
+  564:  	displayNumber();									//DISPLAY NUMBERs in LCD
+  005e 060000       [3]     JMP   displayNumber
+  0061 160000       [4]     JSR   Print
+  0064 c620         [1]     LDAB  #32
+  0066 160000       [4]     JSR   Print
+  0069 c620         [1]     LDAB  #32
+  006b 3d           [5]     RTS   
+  006c 160000       [4]     JSR   Print
+  006f c655         [1]     LDAB  #85
+  0071 060000       [3]     JMP   Print
+  0074 160000       [4]     JSR   Print
+  0077 c644         [1]     LDAB  #68
+  0079 060000       [3]     JMP   Print
+  007c 160000       [4]     JSR   Print
+  007f c64e         [1]     LDAB  #78
+  0081 060000       [3]     JMP   Print
+  565:  }
+  566:  
+  567:  /********************************************************************/
+  568:  /*  This function allows the user to enter a new number.  The       */
+  569:  /*  number entered, will appear in the ones place on the display    */
+  570:  /********************************************************************/
+  571:  void insertNumber(char USER_NUMBER)
+  572:  {
+*** EVALUATION ***
+
+Function: insertNumber
+Source  : C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\Sources\main.c
+Options : -CPUHCS12 -D_HCS12_SERIALMON -D__NO_FLOAT__ -Env"GENPATH=C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11;C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\bin;C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\prm;C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\cmd;C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\Sources;C:\Program Files (x86)\Freescale\CWS12v5.1\lib\HC12c\lib;C:\Program Files (x86)\Freescale\CWS12v5.1\lib\HC12c\src;C:\Program Files (x86)\Freescale\CWS12v5.1\lib\HC12c\include" -Env"LIBPATH=C:\Program Files (x86)\Freescale\CWS12v5.1\lib\HC12c\include" -Env"OBJPATH=C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\bin" -Env"TEXTPATH=C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\bin" -Lasm=%n.lst -Ms -ObjN="C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\ECE_367_Lab_11_Data\Standard\ObjectCode\main.c.o" -WmsgSd1106
+
+  0000 37           [2]     PSHB  
+  573:       COUNT_VALUE = 10 * (COUNT_VALUE % 10);                      //Take ones digit and multiply it by 10, store in countval
+  0001 f60000       [3]     LDAB  COUNT_VALUE
+  0004 860a         [1]     LDAA  #10
+  0006 160000       [4]     JSR   _BDIVMODU
+  0009 860a         [1]     LDAA  #10
+  000b 12           [1]     MUL   
+  574:       
+  575:       COUNT_VALUE = COUNT_VALUE + USER_NUMBER;                    //Add user entered num to count_val
+  000c ebb0         [3]     ADDB  1,SP+
+  000e 7b0000       [3]     STAB  COUNT_VALUE
+  576:  }
+  0011 3d           [5]     RTS   
+  577:  
+  578:  
+  579:  
+  580:  /********************************************************************/
+  581:  /*  This sub displays the number that the count is currently at.    */
+  582:  /*                                                                  */
+  583:  /********************************************************************/
+  584:  void displayNumber(void)
+  585:  {
+*** EVALUATION ***
+
+Function: displayNumber
+Source  : C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\Sources\main.c
+Options : -CPUHCS12 -D_HCS12_SERIALMON -D__NO_FLOAT__ -Env"GENPATH=C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11;C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\bin;C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\prm;C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\cmd;C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\Sources;C:\Program Files (x86)\Freescale\CWS12v5.1\lib\HC12c\lib;C:\Program Files (x86)\Freescale\CWS12v5.1\lib\HC12c\src;C:\Program Files (x86)\Freescale\CWS12v5.1\lib\HC12c\include" -Env"LIBPATH=C:\Program Files (x86)\Freescale\CWS12v5.1\lib\HC12c\include" -Env"OBJPATH=C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\bin" -Env"TEXTPATH=C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\bin" -Lasm=%n.lst -Ms -ObjN="C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\ECE_367_Lab_11_Data\Standard\ObjectCode\main.c.o" -WmsgSd1106
+
+  586:       int i;                                                      //declare integer i
+  587:       for(i=0; i<14;i++)                                          //loop 14 times 
+  0000 ce0000       [2]     LDX   #0
+  588:       {
+  589:            Print(0x20);                                           //Print a " "   (space)
+  0003 c620         [1]     LDAB  #32
+  0005 34           [2]     PSHX  
+  0006 160000       [4]     JSR   Print
+  0009 30           [3]     PULX  
+  000a 08           [1]     INX   
+  000b 8e000e       [2]     CPX   #14
+  000e 2df3         [3/1]   BLT   *-11 ;abs = 0003
+  590:       }
+  591:  	     
+  592:       Print((COUNT_VALUE/10)+0x30);                               //Print tens digit
+  0010 f60000       [3]     LDAB  COUNT_VALUE
+  0013 860a         [1]     LDAA  #10
+  0015 160000       [4]     JSR   _BDIVMODU
+  0018 8b30         [1]     ADDA  #48
+  001a b701         [1]     TFR   A,B
+  001c 160000       [4]     JSR   Print
+  593:       
+  594:       Print(COUNT_VALUE % 10+0x30);                               //Print ones digit
+  001f f60000       [3]     LDAB  COUNT_VALUE
+  0022 860a         [1]     LDAA  #10
+  0024 160000       [4]     JSR   _BDIVMODU
+  0027 cb30         [1]     ADDB  #48
+  0029 060000       [3]     JMP   Print
+  595:  }
+  596:  
+  597:  /********************************************************************/
+  598:  /*  This sub does the blinking for use when we reach 00             */
+  599:  /*                                                                  */
+  600:  /********************************************************************/
+  601:  void blink(void)
+  602:  {
+*** EVALUATION ***
+
+Function: blink
+Source  : C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\Sources\main.c
+Options : -CPUHCS12 -D_HCS12_SERIALMON -D__NO_FLOAT__ -Env"GENPATH=C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11;C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\bin;C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\prm;C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\cmd;C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\Sources;C:\Program Files (x86)\Freescale\CWS12v5.1\lib\HC12c\lib;C:\Program Files (x86)\Freescale\CWS12v5.1\lib\HC12c\src;C:\Program Files (x86)\Freescale\CWS12v5.1\lib\HC12c\include" -Env"LIBPATH=C:\Program Files (x86)\Freescale\CWS12v5.1\lib\HC12c\include" -Env"OBJPATH=C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\bin" -Env"TEXTPATH=C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\bin" -Lasm=%n.lst -Ms -ObjN="C:\Users\Mitch\Documents\My Dropbox\My Career\My Education\University of Illinois - Chicago\ECE 367 - Microprocessor Design\ECE 367 Lab 11\ECE 367 Lab 11\ECE_367_Lab_11_Data\Standard\ObjectCode\main.c.o" -WmsgSd1106
+
+  603:       int t;                                                      //declare integer t
+  604:       for(t=0; t<3;t++)                                           //loop through 3 times
+  0000 ce0000       [2]     LDX   #0
+  605:       {
+  606:            Command(0x08);									//TURN LCD OFF
+  0003 c608         [1]     LDAB  #8
+  0005 34           [2]     PSHX  
+  0006 160000       [4]     JSR   Command
+  607:            delayby1ms(1000);                                      //DELAY FOR A SEC
+  0009 cc03e8       [2]     LDD   #1000
+  000c 160000       [4]     JSR   delayby1ms
+  608:            Command(0x0C);                                         //TURN LCD ON
+  000f c60c         [1]     LDAB  #12
+  0011 160000       [4]     JSR   Command
+  609:            delayby1ms(1000);                                      //DELAY FOR A SEC
+  0014 cc03e8       [2]     LDD   #1000
+  0017 160000       [4]     JSR   delayby1ms
+  001a 30           [3]     PULX  
+  001b 08           [1]     INX   
+  001c 8e0003       [2]     CPX   #3
+  001f 2de2         [3/1]   BLT   *-28 ;abs = 0003
+  610:       }
+  611:  }
+  0021 3d           [5]     RTS   
